@@ -159,8 +159,12 @@ end
 -- The count job asks for the number of every pending task. The export
 -- already counts the rows when no filter is active, so the count job only
 -- runs for a filtered view, where the rows are a subset.
+--
+-- Like a read job it carries the revision, so a count that was already
+-- waiting in the queue when a write arrived is dropped instead of
+-- publishing a number that belongs to the older state.
 local function makeCountJob()
-	return { argv = taskwarrior.countArgs(), count = true }
+	return { argv = taskwarrior.countArgs(), count = true, rev = revision }
 end
 
 -- Publish the count for the bar widget's tooltip.
@@ -202,14 +206,16 @@ local function pump()
 	taskwarrior.run(job.argv, function(result)
 		running = false
 		if job.count then
-			local count = taskwarrior.parseCount(result)
-			if count == nil then
-				-- The count is a nicety for the tooltip. The read below
-				-- still loads the rows, so a failure here is not worth
-				-- an error notification.
-				noctalia.log("task count failed: " .. tostring(result.stderr))
-			else
-				publishCount(count)
+			if job.rev == revision then
+				local count = taskwarrior.parseCount(result)
+				if count == nil then
+					-- The count is a nicety for the tooltip. The read
+					-- below still loads the rows, so a failure here is
+					-- not worth an error notification.
+					noctalia.log("task count failed: " .. tostring(result.stderr))
+				else
+					publishCount(count)
+				end
 			end
 		elseif job.rev ~= nil then
 			if job.rev == revision then
