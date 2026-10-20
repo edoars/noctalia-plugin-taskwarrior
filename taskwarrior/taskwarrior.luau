@@ -61,6 +61,22 @@ local function baseArgv(tail)
 	return argv
 end
 
+-- Names the Taskwarrior instance this plugin talks to: the binary, the rc
+-- file, and the data directory. A cached snapshot belongs to one instance,
+-- so a settings change cannot show another instance's tasks.
+function taskwarrior.instanceKey()
+	local parts = { binary() }
+	local rc = cleanConfiguredPath(noctalia.getConfig("task_rc"))
+	if rc ~= nil then
+		table.insert(parts, "rc:" .. rc)
+	end
+	local dataDir = cleanConfiguredPath(noctalia.getConfig("task_data_dir"))
+	if dataDir ~= nil then
+		table.insert(parts, "data:" .. dataDir)
+	end
+	return table.concat(parts, "|")
+end
+
 -- PATH lookup for a bare command name, file existence for a path.
 function taskwarrior.available()
 	local bin = binary()
@@ -150,6 +166,33 @@ local function annotationCount(value)
 	return #value
 end
 
+-- Map one exported row to the task shape the UI renders. A row without a
+-- uuid is not a task and is skipped; every other field falls back to a
+-- neutral value, so a row from a cached snapshot and a row from a fresh
+-- export look the same.
+--
+-- A fresh export carries the annotations as a list; a cached row carries
+-- only their count. Both are accepted.
+function taskwarrior.normalizeTask(entry)
+	if type(entry) ~= "table" or type(entry.uuid) ~= "string" then
+		return nil
+	end
+	local notes = annotationCount(entry.annotations)
+	if entry.annotations == nil and type(entry.notes) == "number" then
+		notes = entry.notes
+	end
+	return {
+		uuid = entry.uuid,
+		description = type(entry.description) == "string" and entry.description or "",
+		project = type(entry.project) == "string" and entry.project or "",
+		tags = stringList(entry.tags),
+		urgency = type(entry.urgency) == "number" and entry.urgency or 0,
+		due = type(entry.due) == "string" and entry.due or "",
+		entry = type(entry.entry) == "string" and entry.entry or "",
+		notes = notes,
+	}
+end
+
 -- Parse a runAsync result of `task ... export` into a plain array of tasks.
 -- Returns nil plus an error message on failure. Malformed rows are skipped
 -- rather than crashing the render.
@@ -169,17 +212,9 @@ function taskwarrior.parseExport(result)
 	end
 	local tasks = {}
 	for _, entry in ipairs(decoded) do
-		if type(entry) == "table" and type(entry.uuid) == "string" then
-			table.insert(tasks, {
-				uuid = entry.uuid,
-				description = type(entry.description) == "string" and entry.description or "",
-				project = type(entry.project) == "string" and entry.project or "",
-				tags = stringList(entry.tags),
-				urgency = type(entry.urgency) == "number" and entry.urgency or 0,
-				due = type(entry.due) == "string" and entry.due or "",
-				entry = type(entry.entry) == "string" and entry.entry or "",
-				notes = annotationCount(entry.annotations),
-			})
+		local task = taskwarrior.normalizeTask(entry)
+		if task ~= nil then
+			table.insert(tasks, task)
 		end
 	end
 	return tasks
@@ -231,12 +266,29 @@ function taskwarrior.exportArgs(filter)
 	return baseArgv(tail)
 end
 
--- Convenience single-shot read for entries that do not serialize writes.
-function taskwarrior.export(filter, cb)
-	taskwarrior.run(taskwarrior.exportArgs(filter), function(result)
-		local tasks, err = taskwarrior.parseExport(result)
-		cb(tasks, err)
-	end)
+-- The pending count without the rows: `task ... count` prints one number.
+-- Cheaper than an export, and the count of every pending task rather than
+-- the count of the rows a filter selected.
+function taskwarrior.countArgs()
+	return baseArgv({ "status:pending", "-WAITING", "count" })
+end
+
+-- Parse a runAsync result of `task ... count`. Returns the number, or nil
+-- plus an error message.
+function taskwarrior.parseCount(result)
+	if type(result) ~= "table" then
+		return nil, "task did not return a result"
+	end
+	local msg = taskwarrior.failureMessage(result)
+	if msg ~= nil then
+		return nil, msg
+	end
+	local raw = type(result.stdout) == "string" and trim(result.stdout) or ""
+	local count = tonumber(raw)
+	if count == nil then
+		return nil, "task count returned an unreadable number"
+	end
+	return math.floor(count)
 end
 
 -- ── Compose parsing ─────────────────────────────────────────────────────────

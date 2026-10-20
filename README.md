@@ -1,8 +1,8 @@
 # Taskwarrior
 
-A [noctalia](https://github.com/noctalia-dev/noctalia) v5 bar plugin backed by [Taskwarrior](https://taskwarrior.org). Click the bar glyph to toggle a panel that lists your **pending** tasks. A capture box sits at the top: type a task, press Enter, and it lands in Taskwarrior while the box clears and keeps focus. New tasks are tagged `inbox` by default. Rows show description, project, tags, and due date. You can complete, edit descriptions, filter, or delete tasks through the `task` CLI. The bar glyph's tooltip shows the pending count and refreshes every two seconds.
+A [noctalia](https://github.com/noctalia-dev/noctalia) v5 bar plugin backed by [Taskwarrior](https://taskwarrior.org). Click the bar glyph to toggle a panel that lists your **pending** tasks. A capture box sits at the top: type a task, press Enter, and it lands in Taskwarrior while the box clears and keeps focus. New tasks are tagged `inbox` by default. Rows show description, project, tags, and due date. You can complete, edit descriptions, filter, or delete tasks through the `task` CLI. The bar glyph's tooltip shows the pending count of the last load.
 
-It never writes task files itself: every read and write goes through `task`.
+It never writes task files itself: every read and write goes through `task`. It also runs no command of its own while the panel stays closed: opening the panel is what loads the tasks, and the last load is kept on disk so the panel opens with the tasks it had last time.
 
 ## Plugin
 
@@ -30,6 +30,7 @@ noctalia msg panel-toggle lpzchr/taskwarrior:panel
 | **Undo** (panel header) | Revert the most recent complete or delete (`task undo`); visible for a few seconds |
 | Filter chips (panel top) | Apply a saved Taskwarrior filter, configured in the plugin settings |
 | 🔍 button (panel top) | Reveal a filter box that accepts any Taskwarrior filter expression |
+| ↻ button (panel header) | Load the tasks again, which is how changes made in a terminal show up |
 | ⚙ button (panel header) | Open this plugin's page in *Settings → Plugins* |
 
 That settings page also opens from the command line:
@@ -46,7 +47,7 @@ noctalia msg settings-open-plugin lpzchr/taskwarrior
 
 - **Sorted by urgency by default.** Taskwarrior's computed urgency score decides the order. The settings offer newest-first, oldest-first, and alphabetical instead. Priority is never displayed and no panel action sets it, though a capture line can still name it like any other Taskwarrior attribute.
 
-- **Refresh policy.** The bar poll updates the pending count every two seconds. The panel refreshes after each in-panel write, on open, and when a plugin setting changes. Changes made in a terminal while the panel is open appear on the next write or reopen.
+- **Refresh policy.** The plugin runs no command while the panel is closed. Opening the panel loads the tasks, and the panel refreshes after each in-panel write and when you press the refresh button. Changes made in a terminal show up on the next refresh, write, or reopen. The last load is kept on disk, so a reopened panel paints the tasks it had last time at once and then refreshes them.
 
 - **Commit-on-submit editing.** Inline edits only reach Taskwarrior when you press **Enter**. Closing the panel discards an uncommitted edit.
 
@@ -86,11 +87,13 @@ Alternatively copy the `taskwarrior/` directory into `~/.local/share/noctalia/pl
 ## Development
 
 ```
+```
 taskwarrior/
   plugin.toml         # manifest: id, settings, panel + widget entries
-  todo.luau           # bar widget (2s pending-count poll)
+  todo.luau           # bar widget: toggles the panel, shows the pending count
   panel.luau          # panel UI + serial task queue
   taskwarrior.luau    # shared client: export/parse + argv builders
+  cache.luau          # on-disk snapshot of the last load
   translations/en.json
   README.md
   thumbnail.webp

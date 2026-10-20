@@ -7,16 +7,25 @@
 -- below is a read-and-tick view; project, tags and due dates are shown but
 -- never edited here.
 --
+-- Opening the panel is what runs `task`. The widget on the bar only toggles
+-- the panel, so the plugin starts no command of its own while the panel
+-- stays closed.
+--
 -- The panel owns a FIFO of task processes: the next command is launched only
 -- after the previous callback fires, so Taskwarrior is never written by two
 -- processes at once. Reads share the queue, so a refresh can never interleave
 -- with a write. After writes drain, one coalesced export refreshes the model.
+--
+-- The last load is kept on disk, so a reopened panel paints the tasks it
+-- had last time at once and then refreshes them. The bar widget reads the
+-- same snapshot for the pending count it shows in its tooltip.
 --
 -- UI interactions are optimistic (the row updates immediately) and the queued
 -- write confirms; a failed write raises an error notification and the
 -- coalesced refresh restores the real state.
 
 local taskwarrior = require("./taskwarrior.luau")
+local cache = require("./cache.luau")
 
 local PANEL_WIDTH = 560 -- keep in sync with the [[panel]] width in plugin.toml
 local TEXT_WIDTH = PANEL_WIDTH - 212 -- description room left beside padding and row buttons
@@ -27,7 +36,7 @@ local loaded = false
 local loadError = nil
 local lastNotifiedError = nil
 local panelOpen = false
-
+local total = nil -- pending tasks in Taskwarrior, whatever filter is active
 local composeSeq = 0 -- bumping the input's key gives a fresh, empty, focused field
 local composeText = ""
 local filter = "" -- active taskwarrior filter, "" for everything pending
@@ -138,9 +147,39 @@ local function sortItems()
 end
 
 -- ── Serial task queue ───────────────────────────────────────────────────────
+-- Forward declaration: pump() runs the refresh a write scheduled, and
+-- refresh() calls pump() to start the jobs.
+local refresh
 
+-- A read job loads the rows the filter selects.
 local function makeReadJob()
 	return { argv = taskwarrior.exportArgs(filter), rev = revision }
+end
+
+-- The count job asks for the number of every pending task. The export
+-- already counts the rows when no filter is active, so the count job only
+-- runs for a filtered view, where the rows are a subset.
+local function makeCountJob()
+	return { argv = taskwarrior.countArgs(), count = true }
+end
+
+-- Publish the count for the bar widget's tooltip.
+local function publishCount(count)
+	if count == nil then
+		return
+	end
+	total = count
+	noctalia.state.set("todo_count", count)
+end
+
+-- Keep the snapshot on disk so the next open of the panel paints at once.
+-- The rows in it belong to the filter they were loaded with, so they are
+-- only restored when that filter is the one in force.
+local function saveSnapshot()
+	local ok, err = cache.save(items, filter, total)
+	if not ok then
+		noctalia.log("could not save the task snapshot: " .. tostring(err))
+	end
 end
 
 local function pump()
@@ -148,8 +187,12 @@ local function pump()
 		return
 	end
 	if #queue == 0 and refreshWanted then
+		-- A write drained: run the one refresh it scheduled. The jobs go
+		-- through refresh() so a write-triggered load looks exactly like
+		-- the one a filter change schedules.
 		refreshWanted = false
-		table.insert(queue, makeReadJob())
+		refresh()
+		return
 	end
 	if #queue == 0 then
 		return
@@ -158,7 +201,17 @@ local function pump()
 	running = true
 	taskwarrior.run(job.argv, function(result)
 		running = false
-		if job.rev ~= nil then
+		if job.count then
+			local count = taskwarrior.parseCount(result)
+			if count == nil then
+				-- The count is a nicety for the tooltip. The read below
+				-- still loads the rows, so a failure here is not worth
+				-- an error notification.
+				noctalia.log("task count failed: " .. tostring(result.stderr))
+			else
+				publishCount(count)
+			end
+		elseif job.rev ~= nil then
 			if job.rev == revision then
 				local tasks, err = taskwarrior.parseExport(result)
 				if err ~= nil then
@@ -166,13 +219,18 @@ local function pump()
 					notifyFailure(err)
 				else
 					items = tasks
-					sortItems()
 					loadError = nil
 					lastNotifiedError = nil
 					if editingId ~= nil and findItem(editingId) == nil then
 						editingId = nil
 						editingText = ""
 					end
+					if filter == "" then
+						-- Every pending task is on screen, so the rows
+						-- are the count.
+						publishCount(#tasks)
+					end
+					saveSnapshot()
 				end
 				loaded = true
 				render()
@@ -186,9 +244,14 @@ local function pump()
 		pump()
 	end)
 end
-
-local function refresh()
+-- A load is the rows for the active filter, plus the pending count when a
+-- filter hides some of the tasks. Every load goes through here, so the two
+-- kinds of load always look the same.
+refresh = function()
 	revision += 1
+	if filter ~= "" then
+		table.insert(queue, makeCountJob())
+	end
 	table.insert(queue, makeReadJob())
 	pump()
 end
@@ -597,6 +660,11 @@ local function header()
 			})
 		)
 	end
+	-- The list does not poll: this button asks Taskwarrior for the tasks
+	-- again, which is also how changes made in a terminal show up.
+	table.insert(children, glyphButton("header-refresh", "refresh", tr("tip_refresh"), "ghost", 1, function()
+		refresh()
+	end))
 	table.insert(children, glyphButton("header-settings", "settings", tr("tip_settings"), "ghost", 1, "onOpenSettings"))
 	table.insert(children, glyphButton("header-close", "close", tr("tip_close"), "ghost", 1, "onClosePanel"))
 	return ui.row({ key = "header", gap = 8, align = "center" }, children)
@@ -651,6 +719,31 @@ end
 
 -- ── Lifecycle ───────────────────────────────────────────────────────────────
 
+-- Paint the last snapshot at once, so a reopened panel shows its tasks
+-- without waiting for the command that refreshes them. The snapshot is only
+-- a starting point: the refresh below replaces it.
+--
+-- The rows in the snapshot were loaded through the filter they were saved
+-- with, so they are only restored when that filter is the one in force.
+local function restoreSnapshot()
+	local snapshot = cache.load()
+	if snapshot == nil then
+		return false
+	end
+	total = snapshot.total
+	if total ~= nil then
+		noctalia.state.set("todo_count", total)
+	end
+	if snapshot.filter ~= filter then
+		return false
+	end
+	items = snapshot.rows
+	sortItems()
+	loaded = true
+	loadError = nil
+	return true
+end
+
 local function startLoad()
 	editingId = nil
 	editingText = ""
@@ -660,11 +753,11 @@ local function startLoad()
 		loaded = true
 		loadError = tr("task_missing")
 		notifyFailure(loadError)
-	else
-		loaded = false
-		loadError = nil
-		refresh()
+		return
 	end
+	loadError = nil
+	restoreSnapshot()
+	refresh()
 end
 
 function onOpen(_context)

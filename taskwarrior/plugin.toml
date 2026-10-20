@@ -1,10 +1,11 @@
 # Taskwarrior — quick capture on the bar, backed by the `task` CLI.
 # Click the glyph to toggle a panel: type a task and press Enter, or scan
-# what is still pending and tick things off. The bar widget polls
-# `task status:pending -WAITING export` every two seconds.
+# what is still pending and tick things off. The plugin runs no command of
+# its own: the panel loads the tasks when it opens, and the bar widget shows
+# the pending count of the last load.
 id = "lpzchr/taskwarrior"
 name = "Taskwarrior"
-version = "0.2.0"
+version = "0.3.0"
 plugin_api = 24
 author = "lpzchr"
 license = "MIT"

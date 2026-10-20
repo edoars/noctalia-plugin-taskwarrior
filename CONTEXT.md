@@ -33,7 +33,6 @@ A `+tag` on a task. Captured tasks get the configurable default tags (default: `
 
 **Annotation**:
 A dated note attached to a task. Displayed as a count, never edited.
-
 **Due**:
 A task's due date, shown in local calendar days ("today", "tomorrow", "in 3d"). Read-only in the panel.
 
@@ -44,3 +43,11 @@ _Avoid_: Search
 **Saved filter**:
 A filter expression defined in the plugin's settings, offered as a chip.
 _Avoid_: View, preset
+
+**Load**:
+One read of the tasks from Taskwarrior. The plugin loads only when the panel opens, after a write, or when you press the refresh button. It never loads on a timer.
+_Avoid_: Poll, sync, tick
+
+**Snapshot**:
+The last load, kept on disk. The panel paints it at once when it opens and replaces it with the fresh load. The bar widget reads the count from it.
+_Avoid_: Cache, state, backup

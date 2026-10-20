@@ -1,73 +1,45 @@
 --!nonstrict
 -- Taskwarrior — bar widget that toggles the task panel.
 --
+-- The widget runs no command. The panel loads the tasks when the glyph is
+-- clicked and publishes the pending count through the plugin's state
+-- channel; at startup the widget reads the count from the snapshot the
+-- panel wrote last, so the tooltip has a number before the panel has ever
+-- run.
+--
 -- The glyph is configurable (widget setting). It lights up while the panel is
--- open (shared "todo_open" state, published by panel.luau) and its tooltip
--- shows how many tasks are still pending. The count comes from a 2-second
--- `task status:pending -WAITING export` poll, so it reflects edits made
--- outside noctalia too. Polls never overlap: a slow export skips a tick.
+-- open (shared "todo_open" state, published by panel.luau).
 
 local taskwarrior = require("./taskwarrior.luau")
+local cache = require("./cache.luau")
 
 local PANEL_ID = "lpzchr/taskwarrior:panel"
 local open = false
 local pending = 0
-local polling = false
+local known = false -- a count is known, rather than "never loaded"
 local missing = false
-local missingNotified = false
-local unavailable = false
-local errorNotified = false
 
 local function render()
 	barWidget.setGlyph(noctalia.getConfig("glyph"))
 	barWidget.setGlyphColor(open and "primary" or "on_surface")
 	if missing then
 		barWidget.setTooltip(noctalia.tr("tooltip_missing"))
-	elseif unavailable then
-		barWidget.setTooltip(noctalia.tr("tooltip_unavailable"))
-	else
+	elseif known then
 		barWidget.setTooltip(noctalia.tr("tooltip", { count = pending }))
+	else
+		barWidget.setTooltip(noctalia.tr("tooltip_uncached"))
 	end
 end
 
-local function poll()
-	if polling then
+-- The count of the last load, from the snapshot on disk. The panel
+-- publishes the fresh count once it has run.
+local function readSnapshot()
+	local snapshot = cache.load()
+	if snapshot == nil or snapshot.total == nil then
 		return
 	end
-	polling = true
-	taskwarrior.export("", function(tasks, err)
-		polling = false
-		if err ~= nil then
-			if not errorNotified then
-				noctalia.notifyError(noctalia.tr("title"), err)
-			end
-			errorNotified = true
-			unavailable = true
-			pending = 0
-			render()
-			return
-		end
-		errorNotified = false
-		unavailable = false
-		pending = #tasks
-		render()
-	end)
-end
-
-local function checkTask()
-	local wasMissing = missing
-	missing = not taskwarrior.available()
-	if missing then
-		pending = 0
-		unavailable = false
-		if not wasMissing and not missingNotified then
-			missingNotified = true
-			noctalia.notifyError(noctalia.tr("title"), noctalia.tr("task_missing"))
-		end
-	else
-		missingNotified = false
-	end
-	render()
+	pending = snapshot.total
+	known = true
 end
 
 noctalia.state.watch("todo_open", function(value)
@@ -75,23 +47,28 @@ noctalia.state.watch("todo_open", function(value)
 	render()
 end)
 
-function update()
-	poll()
-end
+noctalia.state.watch("todo_count", function(value)
+	if type(value) == "number" then
+		pending = value
+		known = true
+		render()
+	end
+end)
 
 function onClick()
 	noctalia.togglePanel(PANEL_ID)
 end
 
-function onConfigChanged()
-	checkTask()
-	if not missing then
-		poll()
-	end
+missing = not taskwarrior.available()
+
+-- A panel that ran before this widget was placed has already published a
+-- count; the watch above only fires on a change.
+local published = noctalia.state.get("todo_count")
+if type(published) == "number" then
+	pending = published
+	known = true
+else
+	readSnapshot()
 end
 
-noctalia.setUpdateInterval(2000)
-checkTask()
-if not missing then
-	poll()
-end
+render()

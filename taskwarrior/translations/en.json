@@ -55,11 +55,12 @@
   "tip_done": "Complete task",
   "tip_edit": "Edit description",
   "tip_filter": "Filter tasks",
+  "tip_refresh": "Load the tasks again",
   "tip_settings": "Plugin settings",
   "tip_undo": "Undo the last change",
   "title": "Taskwarrior",
   "tooltip": "Taskwarrior — {count} to do",
   "tooltip_missing": "Taskwarrior — task CLI not found",
-  "tooltip_unavailable": "Taskwarrior — unavailable",
+  "tooltip_uncached": "Taskwarrior — click to load the tasks",
   "undo": "Undo"
 }
