@@ -4,6 +4,8 @@ A [noctalia](https://github.com/noctalia-dev/noctalia) v5 bar plugin backed by [
 
 It never writes task files itself: every read and write goes through `task`. It also runs no command of its own while the panel stays closed: opening the panel is what loads the tasks, and the last load is kept on disk so the panel opens with the tasks it had last time.
 
+The panel's refresh button reloads the list, which is also how a change made in a terminal shows up.
+
 ## Plugin
 
 | Field | Value |
@@ -43,7 +45,7 @@ noctalia msg settings-open-plugin lpzchr/taskwarrior
 
 - **Taskwarrior syntax in the capture box.** `fix the sink +home project:house.kitchen due:fri` sets the tag, project, and due date, exactly as the CLI would. Chips under the box show the recognised attribute tokens before you commit. Everything else becomes the description verbatim.
 
-- **Pending only, waiting excluded.** The panel and bar read `task status:pending -WAITING export`. A task you defer with `wait:` disappears from the panel and the bar count until its wait expires.
+- **Pending only, waiting excluded.** The panel reads `task status:pending -WAITING export`, and a filtered view also asks for `task status:pending -WAITING count` so the bar count stays the total of all pending tasks. A task you defer with `wait:` disappears from the panel and the bar count until its wait expires.
 
 - **Sorted by urgency by default.** Taskwarrior's computed urgency score decides the order. The settings offer newest-first, oldest-first, and alphabetical instead. Priority is never displayed and no panel action sets it, though a capture line can still name it like any other Taskwarrior attribute.
 
@@ -86,7 +88,6 @@ Alternatively copy the `taskwarrior/` directory into `~/.local/share/noctalia/pl
 
 ## Development
 
-```
 ```
 taskwarrior/
   plugin.toml         # manifest: id, settings, panel + widget entries
