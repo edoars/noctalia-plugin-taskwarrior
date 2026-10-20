@@ -11,7 +11,7 @@
 -- open (shared "todo_open" state, published by panel.luau).
 
 local taskwarrior = require("./taskwarrior.luau")
-local cache = require("./cache.luau")
+local snapshot = require("./snapshot.luau")
 
 local PANEL_ID = "lpzchr/taskwarrior:panel"
 local open = false
@@ -27,19 +27,32 @@ local function render()
 	elseif known then
 		barWidget.setTooltip(noctalia.tr("tooltip", { count = pending }))
 	else
-		barWidget.setTooltip(noctalia.tr("tooltip_uncached"))
+		barWidget.setTooltip(noctalia.tr("tooltip_no_snapshot"))
 	end
+end
+
+-- The count the tooltip shows. One place, so the state channel and the
+-- snapshot on disk cannot disagree about what is known.
+local function setCount(count)
+	if type(count) ~= "number" then
+		return
+	end
+	pending = count
+	known = true
 end
 
 -- The count of the last load, from the snapshot on disk. The panel
 -- publishes the fresh count once it has run.
 local function readSnapshot()
-	local snapshot = cache.load()
-	if snapshot == nil or snapshot.total == nil then
+	local snap = snapshot.read()
+	if snap == nil then
+		-- No snapshot, or one from another Taskwarrior instance. Either way
+		-- the count on screen belongs to an instance that is no longer in use.
+		pending = 0
+		known = false
 		return
 	end
-	pending = snapshot.total
-	known = true
+	setCount(snap.pendingCount)
 end
 
 noctalia.state.watch("todo_open", function(value)
@@ -47,12 +60,9 @@ noctalia.state.watch("todo_open", function(value)
 	render()
 end)
 
-noctalia.state.watch("todo_count", function(value)
-	if type(value) == "number" then
-		pending = value
-		known = true
-		render()
-	end
+noctalia.state.watch(taskwarrior.PENDING_COUNT_KEY, function(value)
+	setCount(value)
+	render()
 end)
 
 function onClick()
@@ -63,12 +73,23 @@ missing = not taskwarrior.available()
 
 -- A panel that ran before this widget was placed has already published a
 -- count; the watch above only fires on a change.
-local published = noctalia.state.get("todo_count")
+local published = noctalia.state.get(taskwarrior.PENDING_COUNT_KEY)
 if type(published) == "number" then
-	pending = published
-	known = true
+	setCount(published)
 else
 	readSnapshot()
+end
+
+-- A setting change can point the plugin at another Taskwarrior, or at a
+-- binary that is no longer there. The count on the bar belongs to the
+-- instance in use, so it is read again through the snapshot, which checks
+-- the instance.
+function onConfigChanged()
+	missing = not taskwarrior.available()
+	known = false
+	pending = 0
+	readSnapshot()
+	render()
 end
 
 render()

@@ -2,8 +2,8 @@
 -- Snapshot of the last Taskwarrior export, kept on disk.
 --
 -- The plugin runs no background command: the bar widget and the panel read
--- this file instead of shelling out to `task` on a timer, and the panel
--- writes it after every load.
+-- this file instead of shelling out to `task` on a timer. The panel paints it
+-- before its own load replaces it, and writes it after every load.
 --
 -- A snapshot belongs to one Taskwarrior instance. `instance` names the
 -- binary, the rc file, and the data directory the rows came from, so a
@@ -11,7 +11,7 @@
 
 local taskwarrior = require("./taskwarrior.luau")
 
-local cache = {}
+local snapshot = {}
 
 local FILE_NAME = "tasks.json"
 local VERSION = 1
@@ -26,7 +26,7 @@ end
 
 -- Read the snapshot. Returns nil when there is nothing to restore: no file
 -- yet, another Taskwarrior instance, or a file this version cannot read.
-function cache.load()
+function snapshot.read()
 	local file, pathErr = filePath()
 	if file == nil then
 		noctalia.log("no plugin data dir for the task snapshot: " .. tostring(pathErr))
@@ -59,15 +59,15 @@ function cache.load()
 	return {
 		rows = rows,
 		filter = type(decoded.filter) == "string" and decoded.filter or "",
-		total = type(decoded.total) == "number" and decoded.total or nil,
-		savedAt = type(decoded.savedAt) == "number" and decoded.savedAt or nil,
+		pendingCount = type(decoded.pendingCount) == "number" and decoded.pendingCount or nil,
 	}
 end
 
--- Write the snapshot. `total` is the pending count of the last unfiltered
--- load, kept beside the rows so the bar can show it without running a
--- command of its own. Returns ok, err.
-function cache.save(rows, filter, total)
+-- Write the snapshot. `pendingCount` is the pending count: every pending, non-waiting
+-- task, whatever filter the rows were loaded with. It is kept beside the
+-- rows so the bar can show it without running a command of its own. Returns
+-- ok, err.
+function snapshot.write(rows, filter, pendingCount)
 	local file, pathErr = filePath()
 	if file == nil then
 		return false, pathErr
@@ -75,9 +75,8 @@ function cache.save(rows, filter, total)
 	local encoded, encodeErr = noctalia.json.encode({
 		version = VERSION,
 		instance = taskwarrior.instanceKey(),
-		savedAt = math.floor(noctalia.nowMs() / 1000),
 		filter = filter or "",
-		total = total,
+		pendingCount = pendingCount,
 		rows = rows or {},
 	})
 	if encoded == nil then
@@ -86,4 +85,4 @@ function cache.save(rows, filter, total)
 	return noctalia.writeFile(file, encoded)
 end
 
-return cache
+return snapshot

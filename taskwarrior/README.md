@@ -45,11 +45,11 @@ noctalia msg settings-open-plugin lpzchr/taskwarrior
 
 - **Taskwarrior syntax in the capture box.** `fix the sink +home project:house.kitchen due:fri` sets the tag, project, and due date, exactly as the CLI would. Chips under the box show the recognised attribute tokens before you commit. Everything else becomes the description verbatim.
 
-- **Pending only, waiting excluded.** The panel reads `task status:pending -WAITING export`, and a filtered view also asks for `task status:pending -WAITING count` so the bar count stays the total of all pending tasks. A task you defer with `wait:` disappears from the panel and the bar count until its wait expires.
+- **Pending only, waiting excluded.** The panel reads `task status:pending -WAITING export`, and a filtered view also asks for `task status:pending -WAITING count` so the pending count stays the total of all pending tasks. A task you defer with `wait:` disappears from the panel and the pending count until its wait expires.
 
 - **Sorted by urgency by default.** Taskwarrior's computed urgency score decides the order. The settings offer newest-first, oldest-first, and alphabetical instead. Priority is never displayed and no panel action sets it, though a capture line can still name it like any other Taskwarrior attribute.
 
-- **Refresh policy.** The plugin runs no command while the panel is closed. Opening the panel loads the tasks, and the panel refreshes after each in-panel write and when you press the refresh button. Changes made in a terminal show up on the next refresh, write, or reopen. The last load is kept on disk, so a reopened panel paints the tasks it had last time at once and then refreshes them.
+- **Refresh policy.** The plugin runs no command while the panel is closed. Opening the panel loads the tasks, and the panel refreshes after each in-panel write, when the filter changes, and when you press the refresh button. A setting change refreshes too, but only while the panel is open. Changes made in a terminal show up on the next refresh, write, or reopen. The last load is kept on disk, so a reopened panel paints the tasks it had last time at once and then refreshes them.
 
 - **Commit-on-submit editing.** Inline edits only reach Taskwarrior when you press **Enter**. Closing the panel discards an uncommitted edit.
 
@@ -94,7 +94,7 @@ taskwarrior/
   todo.luau           # bar widget: toggles the panel, shows the pending count
   panel.luau          # panel UI + serial task queue
   taskwarrior.luau    # shared client: export/parse + argv builders
-  cache.luau          # on-disk snapshot of the last load
+  snapshot.luau       # on-disk snapshot of the last load
   translations/en.json
   README.md
   thumbnail.webp

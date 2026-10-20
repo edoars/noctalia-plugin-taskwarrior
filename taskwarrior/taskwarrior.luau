@@ -6,9 +6,12 @@
 -- and no way for task text to become an operator, redirect or extra argument.
 -- Reads ask for actionable pending tasks (`status:pending -WAITING`) and parse
 -- the JSON with the host's decoder. Writes are arg builders; callers decide
--- when to run them (the panel serializes them, the bar widget only reads).
-
+-- when to run them (the panel serializes them, the bar widget runs none).
 local taskwarrior = {}
+
+-- The state key the panel publishes the pending count under and the bar
+-- widget reads it from. One name, so the two entries cannot drift apart.
+taskwarrior.PENDING_COUNT_KEY = "todo_count"
 
 local function trim(value)
 	if type(value) ~= "string" then
@@ -29,16 +32,24 @@ local function binary()
 	return cleanConfiguredPath(noctalia.getConfig("task_binary")) or "task"
 end
 
+-- The Taskwarrior instance the plugin talks to: the rc file and the data
+-- directory, either of which may be unset. One place, so the instance the
+-- commands run against and the instance a snapshot belongs to cannot drift
+-- apart.
+local function instanceOverrides()
+	return cleanConfiguredPath(noctalia.getConfig("task_rc")),
+		cleanConfiguredPath(noctalia.getConfig("task_data_dir"))
+end
+
 -- Optional taskwarrior instance overrides, placed immediately after the
 -- binary: `task rc:/path/taskrc rc.data.location=/path/data ...`. Empty
 -- settings produce no override and taskwarrior uses its own defaults.
 local function contextArgs()
 	local args = {}
-	local rc = cleanConfiguredPath(noctalia.getConfig("task_rc"))
+	local rc, dataDir = instanceOverrides()
 	if rc ~= nil then
 		table.insert(args, "rc:" .. rc)
 	end
-	local dataDir = cleanConfiguredPath(noctalia.getConfig("task_data_dir"))
 	if dataDir ~= nil then
 		table.insert(args, "rc.data.location=" .. dataDir)
 	end
@@ -62,15 +73,14 @@ local function baseArgv(tail)
 end
 
 -- Names the Taskwarrior instance this plugin talks to: the binary, the rc
--- file, and the data directory. A cached snapshot belongs to one instance,
--- so a settings change cannot show another instance's tasks.
+-- file, and the data directory. A snapshot belongs to one instance, so a
+-- settings change cannot show another instance's tasks.
 function taskwarrior.instanceKey()
 	local parts = { binary() }
-	local rc = cleanConfiguredPath(noctalia.getConfig("task_rc"))
+	local rc, dataDir = instanceOverrides()
 	if rc ~= nil then
 		table.insert(parts, "rc:" .. rc)
 	end
-	local dataDir = cleanConfiguredPath(noctalia.getConfig("task_data_dir"))
 	if dataDir ~= nil then
 		table.insert(parts, "data:" .. dataDir)
 	end
@@ -168,10 +178,10 @@ end
 
 -- Map one exported row to the task shape the UI renders. A row without a
 -- uuid is not a task and is skipped; every other field falls back to a
--- neutral value, so a row from a cached snapshot and a row from a fresh
--- export look the same.
+-- neutral value, so a row from a snapshot and a row from a fresh export
+-- look the same.
 --
--- A fresh export carries the annotations as a list; a cached row carries
+-- A fresh export carries the annotations as a list; a snapshot row carries
 -- only their count. Both are accepted.
 function taskwarrior.normalizeTask(entry)
 	if type(entry) ~= "table" or type(entry.uuid) ~= "string" then

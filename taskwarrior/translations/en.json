@@ -61,6 +61,6 @@
   "title": "Taskwarrior",
   "tooltip": "Taskwarrior — {count} to do",
   "tooltip_missing": "Taskwarrior — task CLI not found",
-  "tooltip_uncached": "Taskwarrior — click to load the tasks",
+  "tooltip_no_snapshot": "Taskwarrior — click to load the tasks",
   "undo": "Undo"
 }

@@ -25,7 +25,7 @@
 -- coalesced refresh restores the real state.
 
 local taskwarrior = require("./taskwarrior.luau")
-local cache = require("./cache.luau")
+local snapshot = require("./snapshot.luau")
 
 local PANEL_WIDTH = 560 -- keep in sync with the [[panel]] width in plugin.toml
 local TEXT_WIDTH = PANEL_WIDTH - 212 -- description room left beside padding and row buttons
@@ -36,7 +36,7 @@ local loaded = false
 local loadError = nil
 local lastNotifiedError = nil
 local panelOpen = false
-local total = nil -- pending tasks in Taskwarrior, whatever filter is active
+local pendingCount = nil -- pending tasks in Taskwarrior, whatever filter is active
 local composeSeq = 0 -- bumping the input's key gives a fresh, empty, focused field
 local composeText = ""
 local filter = "" -- active taskwarrior filter, "" for everything pending
@@ -49,8 +49,9 @@ local armedDelete = nil -- uuid whose delete button is one click from firing
 local hoverDirty = false -- hover events happened; render once on the next frame tick
 local undoTicks = 0 -- seconds the undo affordance stays on screen
 
--- Serial launch queue. A job is { argv, rev? } where rev marks reads; a read
--- whose revision is stale (a write was queued after it) is discarded.
+-- Serial launch queue. A job is { argv, rev?, count? }: rev marks reads and
+-- counts, and a job whose revision is stale (a write was queued after it) is
+-- discarded.
 local queue = {}
 local running = false
 local refreshWanted = false
@@ -146,6 +147,13 @@ local function sortItems()
 	end)
 end
 
+-- The rows on screen, in display order. Every path that fills the list goes
+-- through here, so a fresh load and a restored snapshot are ordered the same
+-- way and the sort order setting applies to both.
+local function setItems(rows)
+	items = rows
+	sortItems()
+end
 -- ── Serial task queue ───────────────────────────────────────────────────────
 -- Forward declaration: pump() runs the refresh a write scheduled, and
 -- refresh() calls pump() to start the jobs.
@@ -172,15 +180,15 @@ local function publishCount(count)
 	if count == nil then
 		return
 	end
-	total = count
-	noctalia.state.set("todo_count", count)
+	pendingCount = count
+	noctalia.state.set(taskwarrior.PENDING_COUNT_KEY, count)
 end
 
 -- Keep the snapshot on disk so the next open of the panel paints at once.
 -- The rows in it belong to the filter they were loaded with, so they are
 -- only restored when that filter is the one in force.
 local function saveSnapshot()
-	local ok, err = cache.save(items, filter, total)
+	local ok, err = snapshot.write(items, filter, pendingCount)
 	if not ok then
 		noctalia.log("could not save the task snapshot: " .. tostring(err))
 	end
@@ -207,12 +215,12 @@ local function pump()
 		running = false
 		if job.count then
 			if job.rev == revision then
-				local count = taskwarrior.parseCount(result)
+				local count, countErr = taskwarrior.parseCount(result)
 				if count == nil then
 					-- The count is a nicety for the tooltip. The read
 					-- below still loads the rows, so a failure here is
 					-- not worth an error notification.
-					noctalia.log("task count failed: " .. tostring(result.stderr))
+					noctalia.log("task count failed: " .. tostring(countErr))
 				else
 					publishCount(count)
 				end
@@ -224,7 +232,7 @@ local function pump()
 					loadError = tr("load_failed")
 					notifyFailure(err)
 				else
-					items = tasks
+					setItems(tasks)
 					loadError = nil
 					lastNotifiedError = nil
 					if editingId ~= nil and findItem(editingId) == nil then
@@ -666,8 +674,9 @@ local function header()
 			})
 		)
 	end
-	-- The list does not poll: this button asks Taskwarrior for the tasks
-	-- again, which is also how changes made in a terminal show up.
+	-- The list loads only on open, after a write, or from this button, which
+	-- asks Taskwarrior for the tasks again. It is also how changes made in a
+	-- terminal show up.
 	table.insert(children, glyphButton("header-refresh", "refresh", tr("tip_refresh"), "ghost", 1, function()
 		refresh()
 	end))
@@ -732,22 +741,28 @@ end
 -- The rows in the snapshot were loaded through the filter they were saved
 -- with, so they are only restored when that filter is the one in force.
 local function restoreSnapshot()
-	local snapshot = cache.load()
-	if snapshot == nil then
-		return false
+	local snap = snapshot.read()
+	if snap == nil then
+		-- Nothing to restore: no snapshot, another Taskwarrior instance, or a
+		-- file this version cannot read. The rows on screen would then belong
+		-- to another instance, so they go.
+		setItems({})
+		pendingCount = nil
+		loaded = false
+		return
 	end
-	total = snapshot.total
-	if total ~= nil then
-		noctalia.state.set("todo_count", total)
+	publishCount(snap.pendingCount)
+	if snap.filter ~= filter then
+		-- The rows were loaded through another filter, so they are not the
+		-- rows this filter selects. The count still stands: it counts every
+		-- pending task.
+		setItems({})
+		loaded = false
+		return
 	end
-	if snapshot.filter ~= filter then
-		return false
-	end
-	items = snapshot.rows
-	sortItems()
+	setItems(snap.rows)
 	loaded = true
 	loadError = nil
-	return true
 end
 
 local function startLoad()
@@ -793,8 +808,12 @@ function onClose()
 end
 
 function onConfigChanged()
-	startLoad()
-	render()
+	-- A setting change only loads while the panel is open. The plugin runs no
+	-- command of its own while the panel is closed.
+	if panelOpen then
+		startLoad()
+		render()
+	end
 end
 
 -- Second ticks only run while the undo affordance is on screen.

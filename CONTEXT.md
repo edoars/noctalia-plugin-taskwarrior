@@ -12,11 +12,14 @@ Writing down a task quickly before it is forgotten. The panel exists for this ab
 _Avoid_: Add, create, insert
 
 **Pending**:
-A task not yet completed or deleted. What the bar count and the list show, minus waiting tasks (see Waiting).
+A task not yet completed or deleted. What the pending count counts, minus waiting tasks (see Waiting).
 _Avoid_: Open, active (Taskwarrior uses "active" for a started task)
 
+**Pending count**:
+The number of every pending, non-waiting task, whatever filter the panel has. Shown on the bar. Not the number of rows the panel lists.
+_Avoid_: total, bar count
 **Waiting**:
-A pending task deferred with `wait:`. Hidden from the panel and the bar count until the wait expires.
+A pending task deferred with `wait:`. Hidden from the panel and the pending count until the wait expires.
 _Avoid_: Deferred, snoozed
 
 **Urgency**:
@@ -33,6 +36,7 @@ A `+tag` on a task. Captured tasks get the configurable default tags (default: `
 
 **Annotation**:
 A dated note attached to a task. Displayed as a count, never edited.
+
 **Due**:
 A task's due date, shown in local calendar days ("today", "tomorrow", "in 3d"). Read-only in the panel.
 
@@ -45,9 +49,9 @@ A filter expression defined in the plugin's settings, offered as a chip.
 _Avoid_: View, preset
 
 **Load**:
-One read of the tasks from Taskwarrior. The plugin loads only when the panel opens, after a write, or when you press the refresh button. It never loads on a timer.
+One read of the tasks from Taskwarrior, plus the pending count. The plugin loads when the panel opens, after a write, when the filter changes, or when you press the refresh button. A setting change loads too, but only while the panel is open. It never loads on a timer.
 _Avoid_: Poll, sync, tick
 
 **Snapshot**:
-The last load, kept on disk. The panel paints it at once when it opens and replaces it with the fresh load. The bar widget reads the count from it.
+The last load, kept on disk. The panel paints it at once when it opens and replaces it with the fresh load. The bar widget falls back to its pending count from the snapshot before the panel has run.
 _Avoid_: Cache, state, backup
